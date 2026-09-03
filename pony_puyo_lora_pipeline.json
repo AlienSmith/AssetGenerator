@@ -1,0 +1,117 @@
+{
+    "1": {
+        "class_type": "UNETLoader",
+        "inputs": {
+            "unet_name": "autismmix_pony_sdxl_unet.safetensors",
+            "weight_dtype": "default"
+        }
+    },
+    "2": {
+        "class_type": "DualCLIPLoader",
+        "inputs": {
+            "clip_name1": "pony_clip_g.safetensors",
+            "clip_name2": "pony_clip_l.safetensors",
+            "type": "sdxl"
+        }
+    },
+    "3": {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "model": [
+                "1",
+                0
+            ],
+            "clip": [
+                "2",
+                0
+            ],
+            "lora_name": "PuyoPuyo_XL_Styles.safetensors",
+            "strength_model": 1.0,
+            "strength_clip": 1.0
+        }
+    },
+    "4": {
+        "class_type": "CLIPTextEncode",
+        "inputs": {
+            "clip": [
+                "3",
+                1
+            ],
+            "text": "score_9, score_8_up, score_7_up, _XL_PStyles, 1girl, cute petite, school uniform, fang, smile, extremely quality extremely detailed, illustration, flat cel shading, vibrant flat colors, cute anime face, simple background"
+        }
+    },
+    "5": {
+        "class_type": "CLIPTextEncode",
+        "inputs": {
+            "clip": [
+                "3",
+                1
+            ],
+            "text": "score_6, score_5, score_4, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, 3d, photorealistic, realistic"
+        }
+    },
+    "6": {
+        "class_type": "EmptyLatentImage",
+        "inputs": {
+            "width": 832,
+            "height": 1216,
+            "batch_size": 1
+        }
+    },
+    "7": {
+        "class_type": "KSampler",
+        "inputs": {
+            "model": [
+                "3",
+                0
+            ],
+            "positive": [
+                "4",
+                0
+            ],
+            "negative": [
+                "5",
+                0
+            ],
+            "latent_image": [
+                "6",
+                0
+            ],
+            "seed": 1,
+            "steps": 25,
+            "cfg": 6.0,
+            "sampler_name": "dpmpp_2m",
+            "scheduler": "karras",
+            "denoise": 1.0
+        }
+    },
+    "8": {
+        "class_type": "VAELoader",
+        "inputs": {
+            "vae_name": "pony_VAE_SDXL.safetensors"
+        }
+    },
+    "9": {
+        "class_type": "VAEDecode",
+        "inputs": {
+            "samples": [
+                "7",
+                0
+            ],
+            "vae": [
+                "8",
+                0
+            ]
+        }
+    },
+    "10": {
+        "class_type": "SaveImage",
+        "inputs": {
+            "images": [
+                "9",
+                0
+            ],
+            "filename_prefix": "pony_puyo_example"
+        }
+    }
+}

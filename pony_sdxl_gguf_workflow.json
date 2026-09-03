@@ -1,0 +1,608 @@
+{
+    "last_node_id": 13,
+    "last_link_id": 14,
+    "nodes": [
+        {
+            "id": 1,
+            "type": "UnetLoaderGGUF",
+            "pos": [
+                -2800,
+                -140
+            ],
+            "size": [
+                300,
+                46
+            ],
+            "flags": {},
+            "order": 0,
+            "mode": 0,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "MODEL",
+                    "type": "MODEL",
+                    "links": [
+                        1
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "UnetLoaderGGUF"
+            },
+            "widgets_values": [
+                "pony_diffusion_v6_xl_Q8_0.gguf"
+            ]
+        },
+        {
+            "id": 2,
+            "type": "DualCLIPLoaderGGUF",
+            "pos": [
+                -2800,
+                -40
+            ],
+            "size": [
+                300,
+                82
+            ],
+            "flags": {},
+            "order": 1,
+            "mode": 0,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "CLIP",
+                    "type": "CLIP",
+                    "links": [
+                        2,
+                        3
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "DualCLIPLoaderGGUF"
+            },
+            "widgets_values": [
+                "pony_clip_g.safetensors",
+                "pony_clip_l.safetensors",
+                "sdxl"
+            ]
+        },
+        {
+            "id": 3,
+            "type": "CLIPTextEncode",
+            "pos": [
+                -2400,
+                -260
+            ],
+            "size": [
+                400,
+                180
+            ],
+            "flags": {},
+            "order": 2,
+            "mode": 0,
+            "inputs": [
+                {
+                    "name": "clip",
+                    "type": "CLIP",
+                    "link": 2
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "CONDITIONING",
+                    "type": "CONDITIONING",
+                    "links": [
+                        4
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "CLIPTextEncode"
+            },
+            "widgets_values": [
+                "score_9, score_8_up, score_7_up, 1girl, portrait, blue eyes, detailed, masterpiece"
+            ]
+        },
+        {
+            "id": 4,
+            "type": "CLIPTextEncode",
+            "pos": [
+                -2400,
+                -40
+            ],
+            "size": [
+                400,
+                180
+            ],
+            "flags": {},
+            "order": 3,
+            "mode": 0,
+            "inputs": [
+                {
+                    "name": "clip",
+                    "type": "CLIP",
+                    "link": 3
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "CONDITIONING",
+                    "type": "CONDITIONING",
+                    "links": [
+                        5
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "CLIPTextEncode"
+            },
+            "widgets_values": [
+                "score_6, score_5, score_4, lowres, bad anatomy, bad hands, cropped"
+            ]
+        },
+        {
+            "id": 5,
+            "type": "EmptyLatentImage",
+            "pos": [
+                -2000,
+                -140
+            ],
+            "size": [
+                315,
+                106
+            ],
+            "flags": {},
+            "order": 4,
+            "mode": 0,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "LATENT",
+                    "type": "LATENT",
+                    "links": [
+                        6
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "EmptyLatentImage"
+            },
+            "widgets_values": [
+                1024,
+                1024,
+                1
+            ]
+        },
+        {
+            "id": 6,
+            "type": "KSampler",
+            "pos": [
+                -2000,
+                -20
+            ],
+            "size": [
+                315,
+                262
+            ],
+            "flags": {},
+            "order": 5,
+            "mode": 0,
+            "inputs": [
+                {
+                    "name": "model",
+                    "type": "MODEL",
+                    "link": 14
+                },
+                {
+                    "name": "positive",
+                    "type": "CONDITIONING",
+                    "link": 4
+                },
+                {
+                    "name": "negative",
+                    "type": "CONDITIONING",
+                    "link": 5
+                },
+                {
+                    "name": "latent_image",
+                    "type": "LATENT",
+                    "link": 6
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "LATENT",
+                    "type": "LATENT",
+                    "links": [
+                        7
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "KSampler"
+            },
+            "widgets_values": [
+                42,
+                "randomize",
+                20,
+                7.0,
+                "euler",
+                "normal",
+                1.0
+            ]
+        },
+        {
+            "id": 7,
+            "type": "VAELoader",
+            "pos": [
+                -1600,
+                -140
+            ],
+            "size": [
+                300,
+                46
+            ],
+            "flags": {},
+            "order": 6,
+            "mode": 0,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "VAE",
+                    "type": "VAE",
+                    "links": [
+                        8
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "VAELoader"
+            },
+            "widgets_values": [
+                "pony_VAE_SDXL.safetensors"
+            ]
+        },
+        {
+            "id": 8,
+            "type": "VAEDecode",
+            "pos": [
+                -1600,
+                -80
+            ],
+            "size": [
+                210,
+                46
+            ],
+            "flags": {},
+            "order": 7,
+            "mode": 0,
+            "inputs": [
+                {
+                    "name": "samples",
+                    "type": "LATENT",
+                    "link": 7
+                },
+                {
+                    "name": "vae",
+                    "type": "VAE",
+                    "link": 8
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "IMAGE",
+                    "type": "IMAGE",
+                    "links": [
+                        9
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "VAEDecode"
+            }
+        },
+        {
+            "id": 9,
+            "type": "SaveImage",
+            "pos": [
+                -1600,
+                0
+            ],
+            "size": [
+                400,
+                380
+            ],
+            "flags": {},
+            "order": 8,
+            "mode": 0,
+            "inputs": [
+                {
+                    "name": "images",
+                    "type": "IMAGE",
+                    "link": 9
+                }
+            ],
+            "outputs": [],
+            "properties": {
+                "Node name for S&R": "SaveImage"
+            },
+            "widgets_values": [
+                "pony_test"
+            ]
+        },
+        {
+            "id": 10,
+            "type": "LoadImage",
+            "pos": [
+                -2800,
+                260
+            ],
+            "size": [
+                315,
+                314
+            ],
+            "flags": {},
+            "order": 9,
+            "mode": 0,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "IMAGE",
+                    "type": "IMAGE",
+                    "links": [
+                        12
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "LoadImage"
+            },
+            "widgets_values": [
+                "example.png",
+                "image"
+            ]
+        },
+        {
+            "id": 11,
+            "type": "IPAdapterModelLoader",
+            "pos": [
+                -2800,
+                610
+            ],
+            "size": [
+                300,
+                46
+            ],
+            "flags": {},
+            "order": 10,
+            "mode": 0,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "IPADAPTER",
+                    "type": "IPADAPTER",
+                    "links": [
+                        11
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "IPAdapterModelLoader"
+            },
+            "widgets_values": [
+                "ip-adapter_sdxl.safetensors"
+            ]
+        },
+        {
+            "id": 12,
+            "type": "CLIPVisionLoader",
+            "pos": [
+                -2400,
+                610
+            ],
+            "size": [
+                300,
+                46
+            ],
+            "flags": {},
+            "order": 11,
+            "mode": 0,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "CLIP_VISION",
+                    "type": "CLIP_VISION",
+                    "links": [
+                        13
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "CLIPVisionLoader"
+            },
+            "widgets_values": [
+                "ip_adapter_sdxl_vit_h.safetensors"
+            ]
+        },
+        {
+            "id": 13,
+            "type": "IPAdapterAdvanced",
+            "pos": [
+                -2400,
+                260
+            ],
+            "size": [
+                315,
+                462
+            ],
+            "flags": {},
+            "order": 12,
+            "mode": 0,
+            "inputs": [
+                {
+                    "name": "model",
+                    "type": "MODEL",
+                    "link": 1
+                },
+                {
+                    "name": "ipadapter",
+                    "type": "IPADAPTER",
+                    "link": 11
+                },
+                {
+                    "name": "image",
+                    "type": "IMAGE",
+                    "link": 12
+                },
+                {
+                    "name": "clip_vision",
+                    "type": "CLIP_VISION",
+                    "link": 13
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "MODEL",
+                    "type": "MODEL",
+                    "links": [
+                        14
+                    ],
+                    "slot_index": 0
+                }
+            ],
+            "properties": {
+                "Node name for S&R": "IPAdapterAdvanced"
+            },
+            "widgets_values": [
+                0.8,
+                "linear",
+                "concat",
+                0.0,
+                1.0,
+                "V only"
+            ]
+        }
+    ],
+    "links": [
+        [
+            1,
+            1,
+            0,
+            13,
+            0,
+            "MODEL"
+        ],
+        [
+            2,
+            2,
+            0,
+            3,
+            0,
+            "CLIP"
+        ],
+        [
+            3,
+            2,
+            0,
+            4,
+            0,
+            "CLIP"
+        ],
+        [
+            4,
+            3,
+            0,
+            6,
+            1,
+            "CONDITIONING"
+        ],
+        [
+            5,
+            4,
+            0,
+            6,
+            2,
+            "CONDITIONING"
+        ],
+        [
+            6,
+            5,
+            0,
+            6,
+            3,
+            "LATENT"
+        ],
+        [
+            7,
+            6,
+            0,
+            8,
+            0,
+            "LATENT"
+        ],
+        [
+            8,
+            7,
+            0,
+            8,
+            1,
+            "VAE"
+        ],
+        [
+            9,
+            8,
+            0,
+            9,
+            0,
+            "IMAGE"
+        ],
+        [
+            11,
+            11,
+            0,
+            13,
+            1,
+            "IPADAPTER"
+        ],
+        [
+            12,
+            10,
+            0,
+            13,
+            2,
+            "IMAGE"
+        ],
+        [
+            13,
+            12,
+            0,
+            13,
+            3,
+            "CLIP_VISION"
+        ],
+        [
+            14,
+            13,
+            0,
+            6,
+            0,
+            "MODEL"
+        ]
+    ],
+    "groups": [],
+    "config": {},
+    "extra": {},
+    "version": 0.4
+}
