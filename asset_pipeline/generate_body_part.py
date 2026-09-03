@@ -13,7 +13,10 @@ Usage:
 --steps:  sampling steps per image (lower = faster; default 12).
 """
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.dirname(_HERE)  # repo root: holds nodes.py and comfy/ etc.
+sys.path.insert(0, _HERE)  # asset_pipeline/ -> import character
+sys.path.insert(0, _REPO)  # repo root -> import nodes
 
 import importlib.util
 import argparse
