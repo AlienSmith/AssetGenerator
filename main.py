@@ -545,6 +545,22 @@ def start_comfyui(asyncio_loop=None):
     prompt_server.add_routes()
     hijack_progress(prompt_server)
 
+    # Optional HomeBot-compatible generation microservice over a Unix socket.
+    # Gated behind --generation-socket so normal ComfyUI launch is untouched.
+    generation_service = None
+    if args.generation_socket is not None:
+        from generation.service import make_generation_service
+        from generation import server as gen_server
+
+        socket_path = args.generation_socket or None  # '' (flag with no value) -> default
+        generation_service = make_generation_service(prompt_server)
+        asyncio_loop.create_task(gen_server.start_unix_site(prompt_server, socket_path=socket_path))
+        if args.preload_gen_models:
+            threading.Thread(
+                target=generation_service.warm, daemon=True, name="gen-preload"
+            ).start()
+        logging.info("generation microservice enabled (socket=%s)", socket_path or "default")
+
     threading.Thread(target=prompt_worker, daemon=True, args=(prompt_server.prompt_queue, prompt_server,)).start()
 
     if args.quick_test_for_ci:

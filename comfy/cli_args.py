@@ -270,6 +270,8 @@ database_default_path = os.path.abspath(
 )
 parser.add_argument("--database-url", type=str, default=f"sqlite:///{database_default_path}", help="Specify the database URL, e.g. for an in-memory database you can use 'sqlite:///:memory:'.")
 parser.add_argument("--enable-assets", action="store_true", help="Enable the assets system (API routes, database synchronization, and background scanning).")
+parser.add_argument("--generation-socket", type=str, nargs="?", const="", default=None, help="Enable the HomeBot-compatible generation microservice over a Unix socket. Optionally pass a path (default: $GEN_SOCKET_PATH or /run/feishu-bot/gen.sock). Implies --enable-assets so produced assets are persisted.")
+parser.add_argument("--preload-gen-models", action="store_true", help="Preload the generation model stack at startup (VRAM/disk budget check).")
 parser.add_argument("--enable-asset-hashing", action="store_true", help="Compute blake3 content hashes when scanning assets. Hashing enables future asset-portability features (deduplication, cross-machine model resolution) but adds startup cost and per-output cost on large models directories. Off by default; enable to opt in.")
 parser.add_argument("--feature-flag", type=str, action='append', default=[], metavar="KEY[=VALUE]", help="Set a server feature flag. Use KEY=VALUE to set an explicit value, or bare KEY to set it to true. Can be specified multiple times. Boolean values (true/false) and numbers are auto-converted. Examples: --feature-flag show_signin_button=true  or  --feature-flag show_signin_button")
 parser.add_argument("--list-feature-flags", action="store_true", help="Print the registry of known CLI-settable feature flags as JSON and exit.")
@@ -284,6 +286,10 @@ if args.cache_ram is not None and len(args.cache_ram) > 2:
 
 if args.high_ram:
     args.cache_classic = True
+
+# The generation microservice persists produced assets, so it needs the assets DB.
+if args.generation_socket:
+    args.enable_assets = True
 
 if args.windows_standalone_build:
     args.auto_launch = True

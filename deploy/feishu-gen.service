@@ -1,0 +1,53 @@
+[Unit]
+Description=ComfyUI generation service (HomeBot-compatible, Unix socket)
+After=network-online.target
+Wants=network-online.target
+
+# The orchestrator (feishu-home-bot.service) reads the SAME socket. Declaring the
+# dependency here lets HomeBot wait until this service has bound /run/feishu-bot/gen.sock.
+# Requires/After are commented so ComfyUI can also run standalone.
+# Requires=feishu-home-bot.service
+# After=feishu-home-bot.service
+
+[Service]
+Type=simple
+# Dedicated unprivileged user that runs ComfyUI and owns the socket. Must be in
+# the same group as feishu-home-bot.service so both can read/write gen.sock.
+User=feishubot
+Group=feishubot
+
+# Creates /run/feishu-bot owned by this service with mode 0755. The generation
+# socket is bound here; permissions are tightened to group read/write via
+# GEN_SOCKET_MODE (default 0660). Both services must share Group in order to talk.
+RuntimeDirectory=feishu-bot
+RuntimeDirectoryMode=0755
+
+# Working directory containing the ComfyUI source tree, models and assets DB.
+WorkingDirectory=/opt/comfyui
+# Optional environment overrides (socket path, batch/poll limits).
+EnvironmentFile=-/opt/comfyui/.env
+
+# Launch flags for the service:
+#   --generation-socket        enable the /generations + /health HTTP-over-Unix-socket layer
+#   --preload-gen-models       preload model stack at startup (VRAM/disk budget check)
+#   --enable-assets            implied by --generation-socket; persists produced assets
+#   --listen 127.0.0.1         optional normal web/API port (keep internal)
+# VTIME do NOT use --highvram/--gpu-only/--novram: they pin everything resident
+# and break the 16 GB budget with a ~12 GB Flux unet. Default dynamic VRAM is what
+# fits the unet into 16 GB (see plans/asset-generation-microservice.md §4.1).
+ExecStart=/opt/comfyui/.venv/bin/python /opt/comfyui/main.py --generation-socket --preload-gen-models --listen 127.0.0.1 --port 8188
+Restart=always
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/comfyui /run/feishu-bot
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
