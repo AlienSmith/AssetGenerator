@@ -25,15 +25,17 @@ TRIGGER = "GRPZA"
 # same flat-game tone so they read as one layer, not a composite scene.
 STYLE = (
     "flat 2D sprite asset, flat cel shading, bold clean outlines, "
-    "vibrant flat colors, simple flat background, single object on a "
-    "solid flat background, game asset"
+    "vibrant flat colors, single object on a white background, "
+    "white background, game asset"
 )
 
 # Shared negative block: kills photorealism, extra layers, text and clutter.
+# "colored background" / "solid color background" keep the model from painting
+# its own flat tone behind the object instead of the requested white.
 NEGATIVE = (
     "photorealistic, realistic, 3d, messy, blurry, lowres, text, watermark, "
     "signature, multiple objects, layered composition, gradient, shadow, "
-    "busy background, scale mismatch"
+    "colored background, solid color background, scale mismatch"
 )
 
 

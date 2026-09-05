@@ -39,9 +39,10 @@ Flux Q8 gguf + game_assets_v3 LoRA + DualCLIP (clip_l + T5 Q8) + ae.safetensors 
 
 ```bash
 mkdir -p /tmp/feishu-gen
+rm -f /tmp/feishu-gen/gen.sock            # clear any stale socket from a prior run
 cd ComfyUI_t && ./venv/bin/python main.py \
   --generation-socket /tmp/feishu-gen/gen.sock \
-  --listen 127.0.0.1 --port 8188
+  --listen 127.0.0.1 --port 8188 --cpu-vae
 ```
 
 - Takes ~30–60 s to boot. Ready when the log prints
@@ -68,59 +69,44 @@ Note: generation routes exist **only on the Unix socket**, not on the TCP port
 
 ## 2. Draw the ControlNet mask/guide
 
-Two options.
+See the standalone drawing guide:
+**[`mask-drawing-guide.md`](mask-drawing-guide.md)** — toolchain
+(nakkas-canvas to draw, svg-mcp to convert/verify), the step-by-step
+workflow, and the mask polarity & design rules (white background; every
+non-background region gets its own distinct dark color with ≥ ~0.38 gray
+separation; always prefer a provided primitive).
 
-### Option A — nakkas-canvas MCP (visual, iterative)
+### Verify the intermediate Canny outline (before generating)
 
-1. `render_svg` with a 768×768 canvas:
-   - background rect `#ffffff` (white — see polarity note below)
-   - body region filled `#000000` (e.g. a `circle` r=300 at 384,384)
-   - inner detail region filled `#ffffff` (e.g. a 5-point star `path`)
-2. Inspect the returned preview; iterate if the shape is off.
-3. `save` with `format: "png"`, `width: 768`, output path inside
-   `ComfyUI_t/input/`. ⚠️ `save` does **not** create parent directories —
-   `mkdir -p` first, and it appends `-1`, `-2`… instead of overwriting.
-4. The saved PNG is RGBA; convert to RGB:
-   ```bash
-   ComfyUI_t/venv/bin/python -c "
-   from PIL import Image
-   im = Image.open('ComfyUI_t/input/<name>.png').convert('RGB')
-   im.save('ComfyUI_t/input/<name>.png', 'PNG')"
-   ```
-
-### Option B — one-liner PIL (fast, no MCP)
+The pipeline reduces the guide to edges with `Canny` (0.4/0.8). Check what
+ControlNet will actually see by running the same nodes on the live server:
 
 ```bash
-ComfyUI_t/venv/bin/python - <<'EOF'
-from PIL import Image, ImageDraw
-import math
-S = 768
-img = Image.new("RGB", (S, S), "white")
-d = ImageDraw.Draw(img)
-cx = cy = S // 2
-r = int(S * 0.39)                      # medal body
-d.ellipse([cx-r, cy-r, cx+r, cy+r], fill="black")
-pts = []
-for i in range(10):                    # star emblem
-    rr = int(r*0.62) if i % 2 == 0 else int(r*0.26)
-    a = math.pi*i/5 - math.pi/2
-    pts.append((cx+rr*math.cos(a), cy+rr*math.sin(a)))
-d.polygon(pts, fill="white")
-img.save("ComfyUI_t/input/medal_star_mask.png", "PNG")
-EOF
+ComfyUI_t/venv/bin/python -c "
+import json, urllib.request, time, uuid
+graph = {
+  '1': {'class_type': 'LoadImage', 'inputs': {'image': 'medal_star_mask.png'}},
+  '2': {'class_type': 'Canny', 'inputs': {'image': ['1', 0], 'low_threshold': 0.4, 'high_threshold': 0.8}},
+  '3': {'class_type': 'SaveImage', 'inputs': {'images': ['2', 0], 'filename_prefix': 'canny_probe/<mask_name>'}},
+}
+pid = str(uuid.uuid4())
+req = urllib.request.Request('http://127.0.0.1:8188/prompt',
+    data=json.dumps({'prompt': graph, 'client_id': 'canny-probe', 'prompt_id': pid}).encode(),
+    headers={'Content-Type': 'application/json'}, method='POST')
+urllib.request.urlopen(req)
+for i in range(40):
+    time.sleep(2)
+    with urllib.request.urlopen(f'http://127.0.0.1:8188/history/{pid}') as r:
+        h = json.loads(r.read())
+    if pid in h and 'outputs' in h[pid]:
+        print('OUT:', [i['filename'] for o in h[pid]['outputs'].values() for i in o.get('images', [])]); break
+"
 ```
 
-### Mask polarity & design rules (learned the hard way)
-
-- **White background, black body region, white inner regions.** The flux-canny
-  hint convention expects a white background; a black background + white body
-  also "works" but the model treats the surrounding black as part of the scene.
-- The guide goes through **Canny**, so only *edges* matter: every fill is
-  reduced to its outline. Flat color regions = clean single outlines.
-- Keep the body region large in frame (≈78% of canvas diameter for medals);
-  tiny regions produce weak Canny edges that ControlNet ignores.
-- Canvas must match the asset type's canvas (768 for weapon/prop/armor,
-  1024 for background — though backgrounds run without a guide).
+The result lands in `ComfyUI_t/output/canny_probe/`. **Every region boundary
+must be visible** in that outline — if an inner region is missing, its fill
+is too close in luminance to its neighbor (see the drawing guide's gray-step
+rule).
 
 ---
 
@@ -172,9 +158,10 @@ done
 ```
 
 Status lifecycle: `pending → running → completed | failed | canceled`.
-Payload: `{status, variant, progress, stage, message}`. A 768² prop takes
-~2 min end-to-end on this GPU (~110 s: ~40 s model load on first run, then
-14 steps × ~2 s). `completed` looks like:
+Payload: `{status, variant, progress, stage, message}`. A 768² prop verified at
+~50 s end-to-end on this GPU (14 steps × ~2 s denoising + ~10 s model init).
+A truly cold boot / first run may add more for disk model load. `completed`
+looks like:
 
 ```json
 {"status": "completed", "variant": "1/1", "progress": 1.0,
@@ -188,8 +175,10 @@ Cancel mid-run with:
 
 ## 5. Collect the output
 
-Files land under `ComfyUI_t/output/flux_<type>/` (e.g. `flux_prop/`), named
-`v01_00001_.png`, `v02_00001_.png`, … per variant:
+Files land under `ComfyUI_t/output/flux_<type>/` (e.g. `flux_prop/`). The
+leading `v01`/`v02` is the variant index; the trailing `00001`/`00002` is a
+**global** image counter that keeps incrementing across runs (it never resets
+per run), so a fresh run often produces `v01_00002_.png`, not `v01_00001_.png`:
 
 ```bash
 ls -t ComfyUI_t/output/flux_prop/ | head
@@ -220,8 +209,9 @@ only — it will not render PNGs.
 
 ```bash
 # 1. server (leave running in its own terminal)
-mkdir -p /tmp/feishu-gen && cd ComfyUI_t && ./venv/bin/python main.py \
-  --generation-socket /tmp/feishu-gen/gen.sock --listen 127.0.0.1 --port 8188
+mkdir -p /tmp/feishu-gen && rm -f /tmp/feishu-gen/gen.sock && cd ComfyUI_t && \
+  ./venv/bin/python main.py --generation-socket /tmp/feishu-gen/gen.sock \
+  --listen 127.0.0.1 --port 8188 --cpu-vae
 
 # 2. mask (PIL one-liner from §2 Option B) — or nakkas-canvas per §2 Option A
 

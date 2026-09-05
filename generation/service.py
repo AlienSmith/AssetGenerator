@@ -30,7 +30,7 @@ import execution
 
 from generation import pipeline as pl
 from generation.asset_types import AssetType, resolve_asset_type
-from generation.guides import make_guide_from_base64
+from generation.guides import make_guide_from_base64, make_guide_with_detail
 from generation.loader import Loader, make_loader
 
 logger = logging.getLogger(__name__)
@@ -75,9 +75,17 @@ class GenerationService:
         job = self._create_job(asset_type, prompt, count)
 
         # Decode + persist the ControlNet reference once for the whole batch.
-        guide_name = make_guide_from_base64(
-            image_base64, width=asset_type.canvas, height=asset_type.canvas
-        )
+        # Background assets have no silhouette (pipeline skips the guide), so a
+        # plain resize is enough; everything else gets the material-bearing
+        # variant so the model has surface-detail cues, not a flat shape.
+        if asset_type.key == "background":
+            guide_name = make_guide_from_base64(
+                image_base64, width=asset_type.canvas, height=asset_type.canvas
+            )
+        else:
+            guide_name = make_guide_with_detail(
+                image_base64, width=asset_type.canvas, height=asset_type.canvas
+            )
         job.guide_name = guide_name
         job.stage = "queued"
 
