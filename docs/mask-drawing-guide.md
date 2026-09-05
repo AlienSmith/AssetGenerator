@@ -38,42 +38,45 @@ file from its "Draw the ControlNet mask/guide" step.
    im = Image.open('ComfyUI_t/input/<name>.png').convert('RGB')
    im.save('ComfyUI_t/input/<name>.png', 'PNG')"
    ```
-6. **Verify the Canny outline** (see probe snippet in the runbook §2) — every
-   region boundary must appear in the intermediate edge image before you
-   spend a generation run on it.
+6. **(Optional) QA: verify the Canny outline** — routine masks that follow the
+   palette rules above don't need this step. Run the probe snippet (runbook
+   §8) only for unusual masks or when a finished asset is missing an element;
+   every region boundary must appear in the intermediate edge image.
+
+## What the pipeline accepts (2026-09-05: line-art hint, Canny node removed)
+
+The graph no longer runs a Canny node. `guides.make_guide_with_detail()`
+normalizes whatever you send into a **white-line edge map on black** —
+flux_canny's exact training format — and `pipeline.build_workflow()` feeds it
+straight into ControlNet. Two reference kinds are auto-detected by mean
+luminance:
+
+1. **Line art (preferred): white strokes on black background.** Mean
+   luminance < 64 → binarized and passed through unchanged. Draw it directly
+   with nakkas-canvas (see workflow above): outline every region with ~8px
+   white strokes on `#000000`. This is the highest-fidelity option — thin
+   features (medal ribbon) survive because the strokes ARE the geometry, not
+   derived edges. Verified live: ribbon present in output.
+2. **Filled region mask: white background + dark fills.** Mean luminance ≥ 64
+   → converted via FIND_EDGES + threshold + dilation into solid single-stroke
+   lines around every region boundary. Simpler to draw, but thin features can
+   still fade in the render at ControlNet strength 0.5.
 
 ## Mask polarity & design rules (learned the hard way)
 
-- **White background; every non-background region gets a dark fill.** The
-  flux-canny hint convention expects a white background. Inner regions must
-  NOT be white: a white star inside a black disc reads as background and the
-  emblem shape is lost.
-- **Canny is region-agnostic — only TWO non-white colors are needed.** Canny
-  does not care what a region represents; it responds purely to luminance
-  *steps* between adjacent regions. Whether neighboring regions use the same
-  color or different colors changes nothing. So the whole palette is:
-  **white `#ffffff` (background) + black `#000000` (body) + gray `#808080`
-  (inner detail)**. Reuse black/gray for every region regardless of meaning.
-- **Luminance step is what matters, not hue.** The pipeline's Canny node
-  (`kornia.filters.canny`, thresholds 0.4/0.8) converts to **grayscale
-  first** (`rgb_to_grayscale`), then Gaussian-blurs (5×5, σ=1) before the
-  Sobel gradient. Two dark colors with similar brightness produce NO edge.
-  Measured on this exact pipeline (768² medal mask, star-in-disc, live
-  server probe):
-
-  | Fill (gray level) | Step vs black body | Inner edge pixels | Verdict |
-  |---|---|---|---|
-  | `#404040` (64) | 64/255 (~0.25) | 0 | ❌ emblem vanishes |
-  | `#606060` (96) | 96/255 (~0.38) | 1168 | ✅ outline survives |
-  | `#808080` (128) | 128/255 (~0.50) | 1066 | ✅ **default** |
-  | `#a0a0a0` (160) | 160/255 (~0.63) | 1064 | ✅ works |
-  | `#c0c0c0` (192) | 192/255 (~0.75) | 1217 | ✅ works |
-
-  Rule of thumb: **adjacent regions must differ by ≥ 96/255 (~0.38) in gray
-  level**; `#808080` on `#000000` is the standard pair.
-- The guide goes through **Canny**, so only *edges* matter: every fill is
-  reduced to its outline. Flat color regions = clean single outlines.
+- **Line art: black background, white strokes.** Inverted from the old
+  region-mask convention. Inner regions must NOT be white: a white star inside
+  a black disc reads as background and the emblem shape is lost.
+- **Region masks: white background; every non-background region gets a dark
+  fill.** Only TWO non-white colors are needed — the converter is
+  region-agnostic and responds purely to luminance *steps* between adjacent
+  regions: **white `#ffffff` (background) + black `#000000` (body) + gray
+  `#808080` (inner detail)**. Adjacent regions must differ by ≥ 96/255 in gray
+  level or no line is drawn between them (`#808080` on `#000000` is the
+  standard pair; `#404040` on `#000000` produces nothing).
+- Only *boundaries* matter: every region is reduced to its outline. Flat
+  color regions = clean single strokes.
 - Keep the body region large in frame (≈78% of canvas diameter for medals);
-  tiny regions produce weak Canny edges that ControlNet ignores.
+  tiny regions produce thin strokes that ControlNet ignores.
 - Canvas must match the asset type's canvas (768 for weapon/prop/armor,
   1024 for background — though backgrounds run without a guide).

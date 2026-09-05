@@ -26,8 +26,10 @@ Usage
         --prompt "GRPZA, red star on a golden medal, white background, game asset" \
         --type prop
 
-The optional `--prefix` controls the `SaveImage` filename prefix so harness runs
-don't collide with microservice output (default ``flux_prop``).
+The optional `--prefix` overrides the `SaveImage` filename prefix entirely.
+By default the run writes to `output/flux_<type>/<prompt>_<timestamp>/` — the
+same per-batch folder scheme the microservice uses (see
+`pipeline.batch_output_slug`).
 """
 from __future__ import annotations
 
@@ -95,15 +97,18 @@ def run(
     )
     print(f"[harness] guide persisted: {guide_name}")
 
-    # 2. Build the workflow graph with the current pipeline code.
+    # 2. Build the workflow graph with the current pipeline code. Outputs land
+    #    in output/flux_<type>/<prompt>_<timestamp>/ unless --prefix overrides.
     seed = int(time.time() * 1000)
+    batch_dir = prefix or f"flux_{asset_type.key}/{pl.batch_output_slug(prompt)}"
     graph = pl.build_workflow(
         asset_type=asset_type,
         prompt=prompt,
         seed=seed,
         guide_image_name=guide_name,
-        filename_prefix=prefix or f"flux_{asset_type.key}",
+        filename_prefix=batch_dir,
     )
+    print(f"[harness] output prefix: {batch_dir}")
 
     # 3. Submit to the RUNNING server over standard HTTP /prompt.
     prompt_id = str(uuid.uuid4())

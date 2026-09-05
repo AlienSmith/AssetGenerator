@@ -60,7 +60,7 @@ ASSET_TYPES: "dict[str, AssetType]" = {
         steps=14,
         denoise=1.0,
         desc=(
-            "single prop, one object only, prop centered, floating icon, "
+            "single prop, one object only, prop centered, item icon, "
             "clean silhouette, game asset icon"
         ),
         extra_neg="character, person, body, hands, multiple objects, shadow on ground, background detail",

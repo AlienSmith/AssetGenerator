@@ -28,6 +28,8 @@ import uuid
 
 import execution
 
+from folder_paths import get_input_directory
+
 from generation import pipeline as pl
 from generation.asset_types import AssetType, resolve_asset_type
 from generation.guides import make_guide_from_base64, make_guide_with_detail
@@ -76,8 +78,9 @@ class GenerationService:
 
         # Decode + persist the ControlNet reference once for the whole batch.
         # Background assets have no silhouette (pipeline skips the guide), so a
-        # plain resize is enough; everything else gets the material-bearing
-        # variant so the model has surface-detail cues, not a flat shape.
+        # plain resize is enough; everything else gets a white-line edge map
+        # (flux_canny's training format) that the graph feeds straight into
+        # ControlNet — see guides.make_guide_with_detail.
         if asset_type.key == "background":
             guide_name = make_guide_from_base64(
                 image_base64, width=asset_type.canvas, height=asset_type.canvas
@@ -87,6 +90,8 @@ class GenerationService:
                 image_base64, width=asset_type.canvas, height=asset_type.canvas
             )
         job.guide_name = guide_name
+        # One output folder per batch: output/flux_<type>/<prompt>_<timestamp>/
+        job.output_dir = pl.batch_output_slug(prompt)
         job.stage = "queued"
 
         # Submit variants (synchronously; validation is the slow async part but
@@ -96,7 +101,9 @@ class GenerationService:
                 break
             variant = job.variants[i]
             try:
-                variant.prompt_id = self._submit_variant(asset_type, prompt, i, guide_name)
+                variant.prompt_id = self._submit_variant(
+                    asset_type, prompt, i, guide_name, job.output_dir
+                )
                 variant.state = "queued"
             except Exception as err:  # noqa: BLE001
                 logger.exception("failed to submit variant %d of job %s", i, job.job_id)
@@ -154,7 +161,12 @@ class GenerationService:
         return job
 
     def _submit_variant(
-        self, asset_type: AssetType, prompt: str, index: int, guide_name: str
+        self,
+        asset_type: AssetType,
+        prompt: str,
+        index: int,
+        guide_name: str,
+        batch_dir: str,
     ) -> str:
         prompt_id = str(uuid.uuid4())
         seed = int(time.time() * 1000) + index * 7919  # per-variant reproducible-ish seed
@@ -163,7 +175,8 @@ class GenerationService:
             prompt=prompt,
             seed=seed,
             guide_image_name=guide_name,
-            filename_prefix=f"flux_{asset_type.key}/v{index + 1:02d}",
+            # Per-batch subfolder: output/flux_<type>/<prompt>_<timestamp>/vNN_*.png
+            filename_prefix=f"flux_{asset_type.key}/{batch_dir}/v{index + 1:02d}",
         )
         return self._queue_prompt(prompt_id, graph)
 
@@ -246,6 +259,7 @@ class GenerationService:
                 variant.state = "pending"
 
         if job.canceled:
+            self._cleanup_guide(job)
             return {
                 "status": "canceled", "variant": f"{done}/{job.count}",
                 "progress": done / job.count, "stage": "canceled",
@@ -253,6 +267,7 @@ class GenerationService:
             }
 
         if failed:
+            self._cleanup_guide(job)
             return {
                 "status": "failed", "variant": f"{done}/{job.count}",
                 "progress": done / job.count, "stage": "failed",
@@ -260,10 +275,14 @@ class GenerationService:
             }
 
         if done == job.count:
+            self._cleanup_guide(job)
             return {
                 "status": "completed", "variant": f"{job.count}/{job.count}",
                 "progress": 1.0, "stage": "done",
-                "message": f"saved {job.count} image(s) to output dir",
+                "message": (
+                    f"saved {job.count} image(s) to "
+                    f"output/flux_{job.asset_type.key}/{job.output_dir}"
+                ),
             }
 
         progress = frac_sum / job.count
@@ -277,6 +296,26 @@ class GenerationService:
             "status": "running", "variant": variant_label,
             "progress": progress, "stage": stage, "message": "",
         }
+
+    def _cleanup_guide(self, job: "JobHandle") -> None:
+        """Delete the job's temporary gen_guide_*.png from the input folder.
+
+        The guide file only exists because ComfyUI's LoadImage node reads from
+        the input folder; once every variant of the job has finished (or the
+        job failed/canceled), the file is dead weight and would otherwise
+        accumulate forever. Safe to call multiple times (idempotent).
+        """
+        guide_name = job.guide_name
+        if not guide_name:
+            return
+        job.guide_name = None
+        try:
+            path = os.path.join(get_input_directory(), guide_name)
+            if os.path.isfile(path):
+                os.remove(path)
+                logger.info("removed temporary guide %s", guide_name)
+        except OSError:
+            logger.exception("failed to remove guide %s", guide_name)
 
     def _sampler_frac_for(self, job: "JobHandle") -> float | None:
         """Live sampler progress for the currently running variant of this job.
@@ -315,6 +354,7 @@ class JobHandle:
         self.canceled = False
         self.error: str | None = None
         self.guide_name: str | None = None
+        self.output_dir: str | None = None
         self.created = time.time()
         # One variant per requested image.
         self.variants: list[VariantHandle] = [VariantHandle() for _ in range(count)]

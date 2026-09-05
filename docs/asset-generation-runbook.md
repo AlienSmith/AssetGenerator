@@ -72,41 +72,11 @@ Note: generation routes exist **only on the Unix socket**, not on the TCP port
 See the standalone drawing guide:
 **[`mask-drawing-guide.md`](mask-drawing-guide.md)** — toolchain
 (nakkas-canvas to draw, svg-mcp to convert/verify), the step-by-step
-workflow, and the mask polarity & design rules (white background; every
-non-background region gets its own distinct dark color with ≥ ~0.38 gray
-separation; always prefer a provided primitive).
-
-### Verify the intermediate Canny outline (before generating)
-
-The pipeline reduces the guide to edges with `Canny` (0.4/0.8). Check what
-ControlNet will actually see by running the same nodes on the live server:
-
-```bash
-ComfyUI_t/venv/bin/python -c "
-import json, urllib.request, time, uuid
-graph = {
-  '1': {'class_type': 'LoadImage', 'inputs': {'image': 'medal_star_mask.png'}},
-  '2': {'class_type': 'Canny', 'inputs': {'image': ['1', 0], 'low_threshold': 0.4, 'high_threshold': 0.8}},
-  '3': {'class_type': 'SaveImage', 'inputs': {'images': ['2', 0], 'filename_prefix': 'canny_probe/<mask_name>'}},
-}
-pid = str(uuid.uuid4())
-req = urllib.request.Request('http://127.0.0.1:8188/prompt',
-    data=json.dumps({'prompt': graph, 'client_id': 'canny-probe', 'prompt_id': pid}).encode(),
-    headers={'Content-Type': 'application/json'}, method='POST')
-urllib.request.urlopen(req)
-for i in range(40):
-    time.sleep(2)
-    with urllib.request.urlopen(f'http://127.0.0.1:8188/history/{pid}') as r:
-        h = json.loads(r.read())
-    if pid in h and 'outputs' in h[pid]:
-        print('OUT:', [i['filename'] for o in h[pid]['outputs'].values() for i in o.get('images', [])]); break
-"
-```
-
-The result lands in `ComfyUI_t/output/canny_probe/`. **Every region boundary
-must be visible** in that outline — if an inner region is missing, its fill
-is too close in luminance to its neighbor (see the drawing guide's gray-step
-rule).
+workflow, and the mask polarity & design rules (white background; black body
++ `#808080` inner details — two non-white colors is all Canny needs, with
+≥ ~0.38 gray separation between adjacent regions; always prefer a provided
+primitive). The optional Canny-outline QA probe lives in §8 — routine masks
+that follow the palette don't need it.
 
 ---
 
@@ -136,10 +106,23 @@ curl -s --unix-socket /tmp/feishu-gen/gen.sock -X POST \
 
 - `count` = number of variants (each is a separate queued prompt with its own
   seed; capped at `GEN_MAX_BATCH_COUNT`, default 8).
-- Prompt tips: type keywords steer the type resolution (`medal`/`coin`/`key`
-  → prop, `sword`/`axe` → weapon, `chestplate`/`helm` → armor). The `GRPZA`
+- Prompt tips: type keywords steer the type resolution (`coin`/`key`/`potion`
+  → prop, `sword`/`axe` → weapon, `chestplate`/`helm` → armor); unmatched
+  prompts fall back to the default type `prop`
+  ([`asset_types.py`](../ComfyUI_t/generation/asset_types.py)). The `GRPZA`
   LoRA trigger + style block are prepended automatically
   ([`prompts.py`](../ComfyUI_t/generation/prompts.py)).
+- **Prompt library:** the per-asset prompt specs live in
+  [`generation/prompts/`](../ComfyUI_t/generation/prompts/README.md) — one
+  `.md` per asset (subject, positive/negative, knobs, iteration log), written
+  from the template
+  [`_SPEC_TEMPLATE.md`](../ComfyUI_t/generation/prompts/_SPEC_TEMPLATE.md) and
+  indexed in the folder's
+  [`README.md`](../ComfyUI_t/generation/prompts/README.md). Copy the asset's
+  **core fragment** (its positive minus the leading `GRPZA`, e.g. `red star on
+  a golden medal`) into the payload's `prompt` field — the service prepends
+  the trigger and appends the type descriptor + style block itself, so pasting
+  a spec's full assembled positive would duplicate those tokens.
 - ⚠️ Don't use `urllib` with a raw `socket` object for this — it dials TCP and
   fails with `Connection refused`. Use `curl --unix-socket` (or a proper
   `HTTPConnection` subclass).
@@ -175,14 +158,21 @@ Cancel mid-run with:
 
 ## 5. Collect the output
 
-Files land under `ComfyUI_t/output/flux_<type>/` (e.g. `flux_prop/`). The
-leading `v01`/`v02` is the variant index; the trailing `00001`/`00002` is a
-**global** image counter that keeps incrementing across runs (it never resets
-per run), so a fresh run often produces `v01_00002_.png`, not `v01_00001_.png`:
+Each batch gets its own folder: `ComfyUI_t/output/flux_<type>/<prompt>_<timestamp>/`
+(e.g. `flux_prop/red_star_on_a_golden_medal_20260905-170154/`), built by
+[`batch_output_slug()`](../ComfyUI_t/generation/pipeline.py) from the sanitized
+prompt (≤48 chars) + `YYYYMMDD-HHMMSS`. Inside, the leading `v01`/`v02` is the
+variant index; the trailing `00001` is a **global** image counter that keeps
+incrementing across runs (it never resets per run):
 
 ```bash
-ls -t ComfyUI_t/output/flux_prop/ | head
+ls -td ComfyUI_t/output/flux_prop/*/ | head      # newest batch first
+ls -t ComfyUI_t/output/flux_prop/<batch_dir>/    # variants of one batch
 ```
+
+The completed job's `message` field reports the exact batch folder. Harness
+runs (`generation/harness.py`) use the same scheme unless `--prefix` overrides
+it.
 
 View the result: open the PNG directly (VS Code preview / `read_file` on the
 image). The `svg-mcp` MCP (`viewSVG` / `viewSVGFile`) is for **SVG** files
@@ -213,7 +203,7 @@ mkdir -p /tmp/feishu-gen && rm -f /tmp/feishu-gen/gen.sock && cd ComfyUI_t && \
   ./venv/bin/python main.py --generation-socket /tmp/feishu-gen/gen.sock \
   --listen 127.0.0.1 --port 8188 --cpu-vae
 
-# 2. mask (PIL one-liner from §2 Option B) — or nakkas-canvas per §2 Option A
+# 2. mask — draw per docs/mask-drawing-guide.md (nakkas-canvas + svg-mcp)
 
 # 3. submit
 ComfyUI_t/venv/bin/python -c "
@@ -231,3 +221,43 @@ curl -s --unix-socket /tmp/feishu-gen/gen.sock http://localhost/generations/gen_
 # 5. collect
 ls -t ComfyUI_t/output/flux_prop/
 ```
+
+---
+
+## 8. QA — verify the intermediate Canny outline (only when needed)
+
+Not part of the routine. If the mask follows the drawing guide's palette
+(white background, black body, `#808080` inner details), the outline is
+guaranteed — skip straight to §3. Run this probe only when a mask is unusual
+(novel geometry, very small regions) or a finished asset is missing an
+element and you suspect the guide.
+
+The pipeline reduces the guide to edges with `Canny` (0.4/0.8). Check what
+ControlNet will actually see by running the same nodes on the live server:
+
+```bash
+ComfyUI_t/venv/bin/python -c "
+import json, urllib.request, time, uuid
+graph = {
+  '1': {'class_type': 'LoadImage', 'inputs': {'image': 'medal_star_mask.png'}},
+  '2': {'class_type': 'Canny', 'inputs': {'image': ['1', 0], 'low_threshold': 0.4, 'high_threshold': 0.8}},
+  '3': {'class_type': 'SaveImage', 'inputs': {'images': ['2', 0], 'filename_prefix': 'canny_probe/<mask_name>'}},
+}
+pid = str(uuid.uuid4())
+req = urllib.request.Request('http://127.0.0.1:8188/prompt',
+    data=json.dumps({'prompt': graph, 'client_id': 'canny-probe', 'prompt_id': pid}).encode(),
+    headers={'Content-Type': 'application/json'}, method='POST')
+urllib.request.urlopen(req)
+for i in range(40):
+    time.sleep(2)
+    with urllib.request.urlopen(f'http://127.0.0.1:8188/history/{pid}') as r:
+        h = json.loads(r.read())
+    if pid in h and 'outputs' in h[pid]:
+        print('OUT:', [i['filename'] for o in h[pid]['outputs'].values() for i in o.get('images', [])]); break
+"
+```
+
+The result lands in `ComfyUI_t/output/canny_probe/`. **Every region boundary
+must be visible** in that outline — if an inner region is missing, its fill
+is too close in luminance to its neighbor (see the drawing guide's gray-step
+rule).

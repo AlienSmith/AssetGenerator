@@ -6,13 +6,18 @@ the same loader/sampler node classes used by `asset_pipeline/generate_body_part.
 (GGUF model, DualCLIPLoaderGGUF, VAELoader, LoraLoaderModelOnly, CLIPTextEncode,
 FluxGuidance, ControlNetLoader, ControlNetApplyAdvanced, KSampler, VAEDecode,
 SaveImage). The reference image is supplied through the graph via a `LoadImage`
-node (saved into the input folder by the service), and its Canny edges drive the
-ControlNet so the produced asset follows the user's silhouette.
+node (saved into the input folder by the service). guides.py normalizes it into
+a white-line edge map — flux_canny's training format — which feeds the
+ControlNet directly so the produced asset follows the user's silhouette.
 
 This module is offline-testable: `build_workflow()` only combines plain strings
 and numbers and returns a plain dict.
 """
 from __future__ import annotations
+
+import re
+import time
+from datetime import datetime
 
 from generation.asset_types import AssetType
 from generation.prompts import build_negative, build_positive
@@ -25,6 +30,20 @@ T5_NAME = "t5-v1_1-xxl-encoder-Q8_0.gguf"
 VAE_NAME = "ae.safetensors"
 LORA_NAME = "game_assets_v3.safetensors"
 CONTROLNET_NAME = "flux_canny_instantx.safetensors"
+
+
+def batch_output_slug(prompt: str, *, when: float | None = None) -> str:
+    """Per-batch output folder name: `<sanitized prompt>_<YYYYMMDD-HHMMSS>`.
+
+    Used as a path segment of the SaveImage prefix so every variant of one
+    batch lands in `output/flux_<type>/<slug>/` instead of mixing with other
+    runs. `when` defaults to now; pass a fixed value for reproducible tests.
+    """
+    words = re.sub(r"[^a-z0-9]+", "_", (prompt or "").lower())
+    words = "_".join(w for w in words.split("_") if w)[:48].rstrip("_")
+    moment = time.time() if when is None else when
+    stamp = datetime.fromtimestamp(moment).strftime("%Y%m%d-%H%M%S")
+    return f"{words or 'batch'}_{stamp}"
 
 
 def build_workflow(
@@ -114,16 +133,22 @@ def build_workflow(
         neg_final = [neg_enc, 0]
     else:
         guide = add("LoadImage", {"image": guide_image_name})
-        hint = add("Canny", {
-            "image": [guide, 0],
-            "low_threshold": 0.4,
-            "high_threshold": 0.8,
+        # The guide arrives as a finished edge map (white lines on black —
+        # guaranteed by guides.make_guide_with_detail), which is exactly the
+        # format flux_canny was trained on, so it feeds ControlNet directly.
+        # Running it through the Canny node would re-derive edges FROM the
+        # lines, doubling every stroke. Persist the exact hint image the model
+        # consumes, next to this variant's render (QA: makes guide-vs-output
+        # mismatches visible).
+        add("SaveImage", {
+            "images": [guide, 0],
+            "filename_prefix": f"{prefix}_canny_hint",
         })
         cn = add("ControlNetApplyAdvanced", {
             "positive": [pos_guid, 0],
             "negative": [neg_enc, 0],
             "control_net": [controlnet, 0],
-            "image": [hint, 0],
+            "image": [guide, 0],
             "strength": strength,
             "start_percent": 0.0,
             "end_percent": 1.0,
