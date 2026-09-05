@@ -55,6 +55,7 @@ def build_workflow(
     filename_prefix: str | None = None,
     guide_image_name: str | None = None,
     cfg: float = 1.0,
+    save_hint: bool = True,
 ) -> dict:
     """Build a single-variant Flux + ControlNet workflow graph.
 
@@ -76,6 +77,10 @@ def build_workflow(
         that have no single-layer silhouette to guide off.
     cfg : float
         Sampler cfg. Flux normally runs at 1.0.
+    save_hint : bool
+        Also dump the exact hint pixels next to the render (QA). In a batch
+        every variant shares ONE guide, so callers pass True only for the
+        first variant — the other dumps would be byte-identical duplicates.
 
     Returns
     -------
@@ -140,10 +145,11 @@ def build_workflow(
         # lines, doubling every stroke. Persist the exact hint image the model
         # consumes, next to this variant's render (QA: makes guide-vs-output
         # mismatches visible).
-        add("SaveImage", {
-            "images": [guide, 0],
-            "filename_prefix": f"{prefix}_canny_hint",
-        })
+        if save_hint:
+            add("SaveImage", {
+                "images": [guide, 0],
+                "filename_prefix": f"{prefix}_canny_hint",
+            })
         cn = add("ControlNetApplyAdvanced", {
             "positive": [pos_guid, 0],
             "negative": [neg_enc, 0],

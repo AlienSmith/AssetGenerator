@@ -24,18 +24,21 @@ Usage
     ./venv/bin/python generation/harness.py \
         --mask input/medal_star_mask.png \
         --prompt "GRPZA, red star on a golden medal, white background, game asset" \
-        --type prop
+        --type prop \
+        --count 4
 
-The optional `--prefix` overrides the `SaveImage` filename prefix entirely.
-By default the run writes to `output/flux_<type>/<prompt>_<timestamp>/` — the
-same per-batch folder scheme the microservice uses (see
-`pipeline.batch_output_slug`).
+`--count N` submits N variants (one seed each) that all share the same
+SaveImage prefix, so the whole batch lands in one folder. The optional
+`--prefix` overrides the `SaveImage` filename prefix entirely. By default the
+run writes to `output/flux_<type>/<prompt>_<timestamp>/` — the same per-batch
+folder scheme the microservice uses (see `pipeline.batch_output_slug`).
 """
 from __future__ import annotations
 
 import argparse
 import base64
 import io
+import os
 import time
 import urllib.request
 import urllib.error
@@ -84,12 +87,14 @@ def run(
     asset_key: str,
     base_url: str,
     prefix: str | None,
+    count: int = 1,
 ) -> dict:
     asset_type = asset_types.resolve_asset_type(prompt)
     if asset_key:
         asset_type = asset_types.ASSET_TYPES[asset_key]
 
-    # 1. Build the detail-bearing guide with the current code on disk.
+    # 1. Build the detail-bearing guide with the current code on disk. One
+    #    guide file serves every variant in the batch.
     guide_name = make_guide_with_detail(
         _mask_base64(mask_path),
         width=asset_type.canvas,
@@ -97,50 +102,71 @@ def run(
     )
     print(f"[harness] guide persisted: {guide_name}")
 
-    # 2. Build the workflow graph with the current pipeline code. Outputs land
-    #    in output/flux_<type>/<prompt>_<timestamp>/ unless --prefix overrides.
-    seed = int(time.time() * 1000)
-    batch_dir = prefix or f"flux_{asset_type.key}/{pl.batch_output_slug(prompt)}"
-    graph = pl.build_workflow(
-        asset_type=asset_type,
-        prompt=prompt,
-        seed=seed,
-        guide_image_name=guide_name,
-        filename_prefix=batch_dir,
-    )
-    print(f"[harness] output prefix: {batch_dir}")
+    # 2. Build + submit one graph per variant. All variants share the same
+    #    per-batch subfolder so the whole batch lands in ONE folder — the same
+    #    scheme the microservice uses (see service._submit_variant), except the
+    #    filename carries the SEED instead of a variant index so a favorite
+    #    style can be reproduced by re-running with that seed:
+    #    output/flux_<type>/<prompt>_<timestamp>/seed<seed>_*.png (or --prefix verbatim).
+    batch_dir = pl.batch_output_slug(prompt)
+    save_prefix = prefix or f"flux_{asset_type.key}/{batch_dir}/seed{{seed}}"
+    print(f"[harness] batch folder: output/flux_{asset_type.key}/{batch_dir}/ ({count} variant(s))")
 
-    # 3. Submit to the RUNNING server over standard HTTP /prompt.
-    prompt_id = str(uuid.uuid4())
-    status, resp = _http_json(
-        "POST", f"{base_url}/prompt",
-        {"prompt": graph, "client_id": "harness", "prompt_id": prompt_id},
-    )
-    if status != 200:
-        raise RuntimeError(f"/prompt failed {status}: {resp}")
-    print(f"[harness] submitted prompt_id={prompt_id} seed={seed}")
-
-    # 4. Poll history until the prompt is done.
-    deadline = time.time() + 300
+    base_seed = int(time.time() * 1000)
     last = None
-    while time.time() < deadline:
-        time.sleep(5)
-        _status, hist = _http_json("GET", f"{base_url}/history/{prompt_id}")
-        if prompt_id not in hist:
-            continue
-        entry = hist[prompt_id]
-        if "outputs" in entry:
-            last = entry
-            break
-        if entry.get("status", {}).get("status_str") == "error":
-            raise RuntimeError(f"prompt {prompt_id} errored: {entry}")
-    if last is None:
-        raise TimeoutError(f"prompt {prompt_id} did not finish in 300s")
+    for i in range(count):
+        seed = base_seed + i
+        graph = pl.build_workflow(
+            asset_type=asset_type,
+            prompt=prompt,
+            seed=seed,
+            guide_image_name=guide_name,
+            filename_prefix=save_prefix.format(seed=seed),
+            # Every variant shares ONE guide file — dump the QA hint only
+            # for the first variant or the batch folder fills with
+            # byte-identical copies.
+            save_hint=(i == 0),
+        )
 
-    print("[harness] done; outputs:")
-    for node_id, out in last["outputs"].items():
-        for img in out.get("images", []):
-            print(f"  {img.get('subfolder', '')}/{img['filename']}")
+        # 3. Submit to the RUNNING server over standard HTTP /prompt.
+        prompt_id = str(uuid.uuid4())
+        status, resp = _http_json(
+            "POST", f"{base_url}/prompt",
+            {"prompt": graph, "client_id": "harness", "prompt_id": prompt_id},
+        )
+        if status != 200:
+            raise RuntimeError(f"/prompt failed {status}: {resp}")
+        print(f"[harness] variant {i + 1}/{count} submitted prompt_id={prompt_id} seed={seed}")
+
+        # 4. Poll history until this variant is done.
+        deadline = time.time() + 300
+        last = None
+        while time.time() < deadline:
+            time.sleep(5)
+            _status, hist = _http_json("GET", f"{base_url}/history/{prompt_id}")
+            if prompt_id not in hist:
+                continue
+            entry = hist[prompt_id]
+            if "outputs" in entry:
+                last = entry
+                break
+            if entry.get("status", {}).get("status_str") == "error":
+                raise RuntimeError(f"prompt {prompt_id} errored: {entry}")
+        if last is None:
+            raise TimeoutError(f"prompt {prompt_id} did not finish in 300s")
+
+        print(f"[harness] variant {i + 1}/{count} done; outputs:")
+        for node_id, out in last["outputs"].items():
+            for img in out.get("images", []):
+                print(f"  {img.get('subfolder', '')}/{img['filename']}")
+
+    # 5. The harness bypasses the microservice, so nothing deletes the guide
+    #    for us — remove it once every variant has executed.
+    try:
+        os.remove(folder_paths.get_annotated_filepath(guide_name))
+        print(f"[harness] guide cleaned up: {guide_name}")
+    except OSError:
+        pass
     return last
 
 
@@ -153,6 +179,8 @@ def main() -> None:
     ap.add_argument("--base-url", default=DEFAULT_URL)
     ap.add_argument("--prefix", default=None,
                     help="SaveImage filename prefix (defaults to flux_<type>)")
+    ap.add_argument("--count", type=int, default=1,
+                    help="number of variants (one seed each) in a single batch folder")
     args = ap.parse_args()
 
     run(
@@ -161,6 +189,7 @@ def main() -> None:
         asset_key=args.asset_key,
         base_url=args.base_url,
         prefix=args.prefix,
+        count=max(1, args.count),
     )
 
 

@@ -177,6 +177,9 @@ class GenerationService:
             guide_image_name=guide_name,
             # Per-batch subfolder: output/flux_<type>/<prompt>_<timestamp>/vNN_*.png
             filename_prefix=f"flux_{asset_type.key}/{batch_dir}/v{index + 1:02d}",
+            # All variants share ONE guide file — dump the QA hint only for
+            # the first variant (the rest would be byte-identical duplicates).
+            save_hint=(index == 0),
         )
         return self._queue_prompt(prompt_id, graph)
 
