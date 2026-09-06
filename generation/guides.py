@@ -16,6 +16,8 @@ from PIL import Image, ImageFilter, ImageOps
 
 import folder_paths
 
+from generation.asset_types import AssetType
+
 
 def decode_image(base64_str: str) -> Image.Image:
     """Decode a base64 PNG/JPEG into an RGB PIL image."""
@@ -129,3 +131,34 @@ def make_guide_with_detail(
     mean = sum(i * count for i, count in enumerate(hist)) / total
     line_art = _binarize(gray) if mean < _LINE_ART_MEAN_MAX else _mask_to_line_art(gray)
     return persist_guide(line_art.convert("RGB"))
+
+
+def prepare_guide(
+    asset_type: AssetType,
+    base64_str: str,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+) -> str | None:
+    """Turn the payload image into the hint the graph should consume.
+
+    Single dispatch point for the per-type `guide_mode` (see asset_types.py):
+
+    * "edge_map" — filled mask or line art -> white-line edge map in
+      flux_canny's training format (`make_guide_with_detail`);
+    * "raw"      — plain resize, ControlNet consumes the pixels as-is
+      (`make_guide_from_base64`);
+    * "none"     — no hint at all: returns None and the graph runs pure
+      txt2img (background assets).
+
+    Returns the input-folder filename for the graph's `LoadImage` node, or
+    None when the asset type needs no guide.
+    """
+    mode = asset_type.guide_mode
+    if mode == "none":
+        return None
+    if mode == "raw":
+        return make_guide_from_base64(base64_str, width=width, height=height)
+    if mode == "edge_map":
+        return make_guide_with_detail(base64_str, width=width, height=height)
+    raise ValueError(f"unknown guide_mode {mode!r} for asset type {asset_type.key!r}")

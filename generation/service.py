@@ -32,7 +32,7 @@ from folder_paths import get_input_directory
 
 from generation import pipeline as pl
 from generation.asset_types import AssetType, resolve_asset_type
-from generation.guides import make_guide_from_base64, make_guide_with_detail
+from generation.guides import prepare_guide
 from generation.loader import Loader, make_loader
 
 logger = logging.getLogger(__name__)
@@ -77,18 +77,13 @@ class GenerationService:
         job = self._create_job(asset_type, prompt, count)
 
         # Decode + persist the ControlNet reference once for the whole batch.
-        # Background assets have no silhouette (pipeline skips the guide), so a
-        # plain resize is enough; everything else gets a white-line edge map
-        # (flux_canny's training format) that the graph feeds straight into
-        # ControlNet — see guides.make_guide_with_detail.
-        if asset_type.key == "background":
-            guide_name = make_guide_from_base64(
-                image_base64, width=asset_type.canvas, height=asset_type.canvas
-            )
-        else:
-            guide_name = make_guide_with_detail(
-                image_base64, width=asset_type.canvas, height=asset_type.canvas
-            )
+        # The per-type guide_mode (asset_types.py) decides how: edge_map types
+        # get a white-line edge map (flux_canny's training format), raw types
+        # a plain resize, and guide-less types (background) get None — the
+        # graph then runs pure txt2img. See guides.prepare_guide.
+        guide_name = prepare_guide(
+            asset_type, image_base64, width=asset_type.canvas, height=asset_type.canvas
+        )
         job.guide_name = guide_name
         # One output folder per batch: output/flux_<type>/<prompt>_<timestamp>/
         job.output_dir = pl.batch_output_slug(prompt)

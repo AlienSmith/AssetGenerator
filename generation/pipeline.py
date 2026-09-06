@@ -120,8 +120,6 @@ def build_workflow(
         "lora_name": LORA_NAME,
         "strength_model": 0.8,
     })
-    controlnet = add("ControlNetLoader", {"control_net_name": CONTROLNET_NAME})
-
     # --- conditioning ---
     pos_enc = add("CLIPTextEncode", {"clip": [clip, 0], "text": positive})
     neg_enc = add("CLIPTextEncode", {"clip": [clip, 0], "text": negative})
@@ -133,10 +131,13 @@ def build_workflow(
     })
 
     if guide_image_name is None:
-        # background: no silhouette hint, pure txt2img.
+        # background: no silhouette hint, pure txt2img. The ControlNet loader
+        # is skipped entirely so the graph carries no dead nodes (and no
+        # controlnet model load) for guide-less types.
         pos_final = [pos_guid, 0]
         neg_final = [neg_enc, 0]
     else:
+        controlnet = add("ControlNetLoader", {"control_net_name": CONTROLNET_NAME})
         guide = add("LoadImage", {"image": guide_image_name})
         # The guide arrives as a finished edge map (white lines on black —
         # guaranteed by guides.make_guide_with_detail), which is exactly the

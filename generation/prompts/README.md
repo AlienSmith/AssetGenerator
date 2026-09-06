@@ -74,3 +74,4 @@ Each `.md` captures, in order:
 | Golden medal | [`medal.md`](medal.md) | prop | proven (one successful run) |
 | Iron sword | [`iron-sword.md`](iron-sword.md) | weapon | authored, pending run |
 | Health potion | [`potion.md`](potion.md) | prop | authored, pending run |
+| Theme backgrounds (forest/dungeon/village/desert/snow/volcano) | [`backgrounds.md`](backgrounds.md) | background | proven (6 themes × 2 variants, txt2img) |

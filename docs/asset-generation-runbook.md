@@ -21,7 +21,12 @@ Flux Q8 gguf + game_assets_v3 LoRA + DualCLIP (clip_l + T5 Q8) + ae.safetensors 
   clean, high-contrast region boundaries (see §2).
 - Asset type (canvas size, ControlNet strength, steps) is derived from prompt
   keywords in [`ComfyUI_t/generation/asset_types.py`](../ComfyUI_t/generation/asset_types.py):
-  `weapon` / `prop` / `armor` → 768², `background` → 1024² (no guide used).
+  `weapon` / `prop` / `armor` → 768², `background` → 1024². Each type carries a
+  `guide_mode`: `edge_map` (mask → white-line edge map, the default), `raw`
+  (plain resize into ControlNet), or `none` — **background runs pure txt2img;
+  the payload image is ignored** (still required by the HTTP contract).
+  Backgrounds also use their own style/negative prompt blocks (no
+  "white background" wording) — see `asset_types.py` `_BACKGROUND_STYLE`.
 
 ### Models required (all present in `ComfyUI_t/models/`)
 

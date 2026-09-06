@@ -52,7 +52,7 @@ import folder_paths  # noqa: E402
 
 from generation import pipeline as pl  # noqa: E402
 from generation import asset_types  # noqa: E402
-from generation.guides import make_guide_with_detail  # noqa: E402
+from generation.guides import prepare_guide  # noqa: E402
 
 
 DEFAULT_URL = "http://127.0.0.1:8188"
@@ -93,14 +93,20 @@ def run(
     if asset_key:
         asset_type = asset_types.ASSET_TYPES[asset_key]
 
-    # 1. Build the detail-bearing guide with the current code on disk. One
+    # 1. Build the guide with the current code on disk — or none at all for
+    #    guide-less types (background runs pure txt2img, no mask needed). One
     #    guide file serves every variant in the batch.
-    guide_name = make_guide_with_detail(
-        _mask_base64(mask_path),
+    image_b64 = _mask_base64(mask_path) if mask_path else ""
+    guide_name = prepare_guide(
+        asset_type,
+        image_b64,
         width=asset_type.canvas,
         height=asset_type.canvas,
     )
-    print(f"[harness] guide persisted: {guide_name}")
+    if guide_name is None:
+        print(f"[harness] asset type {asset_type.key!r} needs no guide (pure txt2img)")
+    else:
+        print(f"[harness] guide persisted: {guide_name}")
 
     # 2. Build + submit one graph per variant. All variants share the same
     #    per-batch subfolder so the whole batch lands in ONE folder — the same
@@ -161,18 +167,22 @@ def run(
                 print(f"  {img.get('subfolder', '')}/{img['filename']}")
 
     # 5. The harness bypasses the microservice, so nothing deletes the guide
-    #    for us — remove it once every variant has executed.
-    try:
-        os.remove(folder_paths.get_annotated_filepath(guide_name))
-        print(f"[harness] guide cleaned up: {guide_name}")
-    except OSError:
-        pass
+    #    for us — remove it once every variant has executed. Guide-less types
+    #    never created one.
+    if guide_name is not None:
+        try:
+            os.remove(folder_paths.get_annotated_filepath(guide_name))
+            print(f"[harness] guide cleaned up: {guide_name}")
+        except OSError:
+            pass
     return last
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--mask", required=True, help="medal/asset mask PNG to guide off")
+    ap.add_argument("--mask", default=None,
+                    help="medal/asset mask PNG to guide off "
+                         "(not needed for guide-less types like background)")
     ap.add_argument("--prompt", required=True, help="free-text subject (no type suffix)")
     ap.add_argument("--type", dest="asset_key", default=None,
                     help="override asset type key: prop|weapon|armor|background")
